@@ -4,6 +4,8 @@ from scipy import stats
 import matplotlib.pyplot as plt
 from datetime import datetime
 import warnings
+import sys
+import argparse
 
 warnings.filterwarnings('ignore')
 np.random.seed(42)
@@ -271,254 +273,141 @@ def futures_portfolio_simulation_with_rebalancing(
     
     return results
 
-def extract_exact_mdd_statistics(results_16x, results_24x):
-    """Extract exact single-number MDD statistics from simulation results"""
+def extract_exact_mdd_statistics(leverage_results):
+    """Extract exact single-number MDD statistics from multiple leverage simulation results"""
     
     print("\n" + "="*70)
     print("EXACT MDD STATISTICS FROM 10,000 SIMULATIONS")
     print("="*70)
     
-    # Leverage 1.6x Analysis
-    stats_16x = None
-    if results_16x['max_drawdowns']:
-        mdd_16x = np.array(results_16x['max_drawdowns']) * 100
-        
-        stats_16x = {
-            'count': len(mdd_16x),
-            'median': np.percentile(mdd_16x, 50),
-            'p95': np.percentile(mdd_16x, 95),
-            'worst': np.max(mdd_16x),
-            'mean': np.mean(mdd_16x)
-        }
-        
-        historical_percentile_16x = (np.sum(mdd_16x <= 32) / len(mdd_16x)) * 100
-        
-        print(f"\nLEVERAGE 1.6x - EXACT MDD NUMBERS:")
-        print(f"   • Sample Size: {stats_16x['count']:,} surviving portfolios")
-        print(f"   • Median MDD: {stats_16x['median']:.2f}%")
-        print(f"   • 95th Percentile MDD: {stats_16x['p95']:.2f}%")
-        print(f"   • Worst MDD: {stats_16x['worst']:.2f}%")
-        print(f"   • Mean MDD: {stats_16x['mean']:.2f}%")
-        print(f"   • Historical 32% MDD is at {historical_percentile_16x:.1f}th percentile")
+    stats_dict = {}
     
-    # Leverage 2.4x Analysis
-    stats_24x = None
-    if results_24x['max_drawdowns']:
-        mdd_24x = np.array(results_24x['max_drawdowns']) * 100
-        
-        stats_24x = {
-            'count': len(mdd_24x),
-            'median': np.percentile(mdd_24x, 50),
-            'p95': np.percentile(mdd_24x, 95),
-            'worst': np.max(mdd_24x),
-            'mean': np.mean(mdd_24x)
-        }
-        
-        historical_percentile_24x = (np.sum(mdd_24x <= 32) / len(mdd_24x)) * 100
-        
-        print(f"\nLEVERAGE 2.4x - EXACT MDD NUMBERS:")
-        print(f"   • Sample Size: {stats_24x['count']:,} surviving portfolios")
-        print(f"   • Median MDD: {stats_24x['median']:.2f}%")
-        print(f"   • 95th Percentile MDD: {stats_24x['p95']:.2f}%")
-        print(f"   • Worst MDD: {stats_24x['worst']:.2f}%")
-        print(f"   • Mean MDD: {stats_24x['mean']:.2f}%")
-        print(f"   • Historical 32% MDD is at {historical_percentile_24x:.1f}th percentile")
+    for leverage, results in leverage_results.items():
+        if results['max_drawdowns']:
+            mdd_data = np.array(results['max_drawdowns']) * 100
+            
+            stats = {
+                'count': len(mdd_data),
+                'median': np.percentile(mdd_data, 50),
+                'p95': np.percentile(mdd_data, 95),
+                'worst': np.max(mdd_data),
+                'mean': np.mean(mdd_data)
+            }
+            
+            historical_percentile = (np.sum(mdd_data <= 32) / len(mdd_data)) * 100
+            
+            print(f"\nLEVERAGE {leverage}x - EXACT MDD NUMBERS:")
+            print(f"   • Sample Size: {stats['count']:,} surviving portfolios")
+            print(f"   • Median MDD: {stats['median']:.2f}%")
+            print(f"   • 95th Percentile MDD: {stats['p95']:.2f}%")
+            print(f"   • Worst MDD: {stats['worst']:.2f}%")
+            print(f"   • Mean MDD: {stats['mean']:.2f}%")
+            print(f"   • Historical 32% MDD is at {historical_percentile:.1f}th percentile")
+            
+            stats_dict[f'{leverage}x'] = stats
     
-    # Direct Comparison
-    if results_16x['max_drawdowns'] and results_24x['max_drawdowns']:
-        print(f"\nDIRECT COMPARISON:")
-        print(f"   • Median MDD Difference: {stats_24x['median'] - stats_16x['median']:+.2f}%")
-        print(f"   • 95th Percentile Difference: {stats_24x['p95'] - stats_16x['p95']:+.2f}%")
-        print(f"   • Worst MDD Difference: {stats_24x['worst'] - stats_16x['worst']:+.2f}%")
-        print(f"   • Risk Multiplier (Median): {stats_24x['median'] / stats_16x['median']:.2f}x")
-    
-    return {'1.6x': stats_16x, '2.4x': stats_24x}
+    return stats_dict
 
-def create_enhanced_plots_with_save(results_16x, results_24x):
-    """Create improved 9-panel dashboard with requested enhancements"""
+def create_enhanced_plots_with_save(leverage_results):
+    """Create improved dashboard with separate subplots for each leverage and only required charts"""
     
-    fig = plt.figure(figsize=(20, 16))
+    leverages = list(leverage_results.keys())
+    num_leverages = len(leverages)
     
-    # Increased subplot spacing as requested
+    # Create figure with dynamic sizing based on number of leverages
+    fig = plt.figure(figsize=(5*num_leverages, 16))
+    
+    # Adjust subplot spacing
     plt.subplots_adjust(
         left=0.06, bottom=0.06, right=0.96, top=0.94,
-        wspace=0.35, hspace=0.45
+        wspace=0.25, hspace=0.35
     )
     
-    # 1. Portfolio Paths - Leverage 1.6x
-    ax1 = plt.subplot(3, 3, 1)
-    for path in results_16x['sample_paths'][:25]:
-        color = 'red' if path['failed'] else 'blue'
-        alpha = 0.8 if path['failed'] else 0.4
-        years_axis = np.array(path['days']) / 252
-        plt.plot(years_axis, path['equity'], color=color, alpha=alpha, linewidth=1)
+    # Define colors for each leverage
+    colors = ['blue', 'green', 'orange', 'red', 'purple']
     
-    plt.axhline(y=100, color='black', linestyle='--', alpha=0.7, label='Initial Capital')
-    plt.axhline(y=21.92, color='green', linestyle=':', alpha=0.7, label='Initial Margin')
-    plt.axhline(y=19.52, color='red', linestyle='-.', alpha=0.7, label='Maintenance Margin')
-    plt.title('Leverage 1.6x - Portfolio Paths', fontweight='bold', fontsize=12)
-    plt.xlabel('Years')
-    plt.ylabel('Equity')
-    plt.legend(fontsize=8)
-    plt.grid(True, alpha=0.3)
-    
-    # 2. Portfolio Paths - Leverage 2.4x
-    ax2 = plt.subplot(3, 3, 2)
-    for path in results_24x['sample_paths'][:25]:
-        color = 'red' if path['failed'] else 'orange'
-        alpha = 0.8 if path['failed'] else 0.4
-        years_axis = np.array(path['days']) / 252
-        plt.plot(years_axis, path['equity'], color=color, alpha=alpha, linewidth=1)
-    
-    plt.axhline(y=100, color='black', linestyle='--', alpha=0.7, label='Initial Capital')
-    plt.axhline(y=32.88, color='green', linestyle=':', alpha=0.7, label='Initial Margin')
-    plt.axhline(y=29.28, color='red', linestyle='-.', alpha=0.7, label='Maintenance Margin')
-    plt.title('Leverage 2.4x - Portfolio Paths', fontweight='bold', fontsize=12)
-    plt.xlabel('Years')
-    plt.ylabel('Equity')
-    plt.legend(fontsize=8)
-    plt.grid(True, alpha=0.3)
-    
-    # 3. 5-Year Failure Probability
-    ax3 = plt.subplot(3, 3, 3)
-    leverages = ['1.6x', '2.4x']
-    failure_rates = [
-        results_16x['failures'] / 10000 * 100,
-        results_24x['failures'] / 10000 * 100
-    ]
-    bars = plt.bar(leverages, failure_rates, color=['skyblue', 'salmon'], alpha=0.8)
-    plt.title('5-Year Failure Probability', fontweight='bold', fontsize=12)
-    plt.ylabel('Failure Probability (%)')
-    
-    for i, v in enumerate(failure_rates):
-        plt.text(i, v + max(0.001, v*0.1), f'{v:.3f}%', ha='center', fontweight='bold')
-    plt.grid(True, alpha=0.3)
-    
-    # 4. Final Equity Distribution - X-axis limited to 1500 as requested
-    ax4 = plt.subplot(3, 3, 4)
-    if results_16x['final_equities']:
-        filtered_16x = [eq for eq in results_16x['final_equities'] if eq <= 1500]
-        plt.hist(filtered_16x, bins=50, alpha=0.7, 
-                label=f'1.6x (n={len(results_16x["final_equities"]):,})', 
-                color='skyblue', density=True)
-    if results_24x['final_equities']:
-        filtered_24x = [eq for eq in results_24x['final_equities'] if eq <= 1500]
-        plt.hist(filtered_24x, bins=50, alpha=0.7, 
-                label=f'2.4x (n={len(results_24x["final_equities"]):,})', 
-                color='salmon', density=True)
-    
-    plt.axvline(x=100, color='black', linestyle='--', alpha=0.7, label='Initial Capital')
-    plt.xlim(0, 1500)  # X-axis limit set to 1500 as requested
-    plt.title('Final Equity Distribution', fontweight='bold', fontsize=12)
-    plt.xlabel('Final Equity')
-    plt.ylabel('Density')
-    plt.legend(fontsize=9)
-    plt.grid(True, alpha=0.3)
-    
-    # 5. Maximum Drawdown Distribution
-    ax5 = plt.subplot(3, 3, 5)
-    if results_16x['max_drawdowns']:
-        mdd_16x = [dd * 100 for dd in results_16x['max_drawdowns']]
-        plt.hist(mdd_16x, bins=40, alpha=0.7, label='1.6x', color='skyblue', density=True)
-    if results_24x['max_drawdowns']:
-        mdd_24x = [dd * 100 for dd in results_24x['max_drawdowns']]
-        plt.hist(mdd_24x, bins=40, alpha=0.7, label='2.4x', color='salmon', density=True)
-    
-    plt.axvline(x=32, color='red', linestyle='--', linewidth=2, label='Historical MDD 32%')
-    plt.title('Maximum Drawdown Distribution', fontweight='bold', fontsize=12)
-    plt.xlabel('Maximum Drawdown (%)')
-    plt.ylabel('Density')
-    plt.legend(fontsize=9)
-    plt.grid(True, alpha=0.3)
-    
-    # 6. Margin Call Experience Rate
-    ax6 = plt.subplot(3, 3, 6)
-    margin_rates = [
-        results_16x['margin_call_paths'] / 10000 * 100,
-        results_24x['margin_call_paths'] / 10000 * 100
-    ]
-    bars = plt.bar(leverages, margin_rates, color=['lightblue', 'lightcoral'], alpha=0.8)
-    plt.title('Margin Call Experience Rate', fontweight='bold', fontsize=12)
-    plt.ylabel('Margin Call Rate (%)')
-    
-    for i, v in enumerate(margin_rates):
-        plt.text(i, v + 1, f'{v:.1f}%', ha='center', fontweight='bold')
-    plt.grid(True, alpha=0.3)
-    
-    # 7. Cumulative Interest Distribution
-    ax7 = plt.subplot(3, 3, 7)
-    if results_16x['total_interests']:
-        plt.hist(results_16x['total_interests'], bins=30, alpha=0.7, 
-                label='1.6x', color='skyblue', density=True)
-    if results_24x['total_interests']:
-        plt.hist(results_24x['total_interests'], bins=30, alpha=0.7, 
-                label='2.4x', color='salmon', density=True)
-    
-    plt.title('Cumulative Interest Distribution', fontweight='bold', fontsize=12)
-    plt.xlabel('Total Interest Paid')
-    plt.ylabel('Density')
-    plt.legend(fontsize=9)
-    plt.grid(True, alpha=0.3)
-    
-    # 8. Risk vs Return Profile
-    ax8 = plt.subplot(3, 3, 8)
-    if results_16x['final_equities'] and results_16x['max_drawdowns']:
-        returns_16x = [(eq/100 - 1) * 100 for eq in results_16x['final_equities'] if eq <= 1500]
-        mdd_16x_filtered = [results_16x['max_drawdowns'][i] * 100 
-                           for i, eq in enumerate(results_16x['final_equities']) if eq <= 1500]
-        plt.scatter(mdd_16x_filtered, returns_16x, alpha=0.5, s=8, color='blue', label='1.6x')
-    
-    if results_24x['final_equities'] and results_24x['max_drawdowns']:
-        returns_24x = [(eq/100 - 1) * 100 for eq in results_24x['final_equities'] if eq <= 1500]
-        mdd_24x_filtered = [results_24x['max_drawdowns'][i] * 100 
-                           for i, eq in enumerate(results_24x['final_equities']) if eq <= 1500]
-        plt.scatter(mdd_24x_filtered, returns_24x, alpha=0.5, s=8, color='red', label='2.4x')
-    
-    plt.axhline(y=0, color='black', linestyle='--', alpha=0.5)
-    plt.axvline(x=32, color='red', linestyle='--', alpha=0.5, label='Historical MDD')
-    plt.ylim(-100, 1400)
-    plt.title('Risk vs Return Profile', fontweight='bold', fontsize=12)
-    plt.xlabel('Maximum Drawdown (%)')
-    plt.ylabel('Total Return (%)')
-    plt.legend(fontsize=9)
-    plt.grid(True, alpha=0.3)
-    
-    # 9. Summary Statistics Table
-    ax9 = plt.subplot(3, 3, 9)
-    ax9.axis('off')
-    
-    stats_data = []
-    for name, results in [('1.6x', results_16x), ('2.4x', results_24x)]:
-        failure_rate = results['failures'] / 10000 * 100
-        margin_rate = results['margin_call_paths'] / 10000 * 100
-        avg_final = np.mean(results['final_equities']) if results['final_equities'] else 0
-        avg_mdd = np.mean(results['max_drawdowns']) * 100 if results['max_drawdowns'] else 0
-        avg_interest = np.mean(results['total_interests']) if results['total_interests'] else 0
+    # 1. Portfolio Paths - One subplot per leverage
+    for i, (leverage, results) in enumerate(leverage_results.items()):
+        ax = plt.subplot(4, num_leverages, i+1)
         
-        stats_data.append([
-            name,
-            f"{failure_rate:.3f}%",
-            f"{margin_rate:.1f}%",
-            f"{avg_final:.0f}",
-            f"{avg_mdd:.1f}%",
-            f"{avg_interest:.2f}"
-        ])
+        for path in results['sample_paths'][:25]:
+            path_color = 'red' if path['failed'] else colors[i % len(colors)]
+            alpha = 0.8 if path['failed'] else 0.4
+            years_axis = np.array(path['days']) / 252
+            plt.plot(years_axis, path['equity'], color=path_color, alpha=alpha, linewidth=1)
+        
+        # Calculate margin requirements for this leverage
+        init_margin = 0.137 * leverage * 100
+        maint_margin = 0.122 * leverage * 100
+        
+        plt.axhline(y=100, color='black', linestyle='--', alpha=0.7, label='Initial Capital')
+        plt.axhline(y=init_margin, color='green', linestyle=':', alpha=0.7, label='Initial Margin')
+        plt.axhline(y=maint_margin, color='red', linestyle='-.', alpha=0.7, label='Maintenance Margin')
+        plt.title(f'Leverage {leverage}x - Portfolio Paths', fontweight='bold', fontsize=12)
+        plt.xlabel('Years')
+        plt.ylabel('Equity')
+        plt.legend(fontsize=8)
+        plt.grid(True, alpha=0.3)
     
-    table = ax9.table(
-        cellText=stats_data,
-        colLabels=['Leverage', 'Failure Rate', 'MC Rate', 'Avg Final', 'Avg MDD', 'Avg Interest'],
-        cellLoc='center',
-        loc='center'
-    )
-    table.auto_set_font_size(False)
-    table.set_fontsize(11)
-    table.scale(1.3, 1.8)
-    ax9.set_title('Summary Statistics', fontweight='bold', fontsize=12, pad=20)
+    # 2. Final Equity Distribution - One subplot per leverage
+    for i, (leverage, results) in enumerate(leverage_results.items()):
+        ax = plt.subplot(4, num_leverages, num_leverages + i + 1)
+        
+        if results['final_equities']:
+            filtered_equities = [eq for eq in results['final_equities'] if eq <= 1500]
+            plt.hist(filtered_equities, bins=50, alpha=0.7, 
+                    color=colors[i % len(colors)], density=True,
+                    label=f'{leverage}x (n={len(results["final_equities"]):,})')
+        
+        plt.axvline(x=100, color='black', linestyle='--', alpha=0.7, label='Initial Capital')
+        plt.xlim(0, 1500)
+        plt.title(f'Leverage {leverage}x - Final Equity Distribution', fontweight='bold', fontsize=12)
+        plt.xlabel('Final Equity')
+        plt.ylabel('Density')
+        plt.legend(fontsize=9)
+        plt.grid(True, alpha=0.3)
+    
+    # 3. Maximum Drawdown Distribution - One subplot per leverage
+    for i, (leverage, results) in enumerate(leverage_results.items()):
+        ax = plt.subplot(4, num_leverages, 2*num_leverages + i + 1)
+        
+        if results['max_drawdowns']:
+            mdd_data = [dd * 100 for dd in results['max_drawdowns']]
+            plt.hist(mdd_data, bins=40, alpha=0.7, 
+                    color=colors[i % len(colors)], density=True,
+                    label=f'{leverage}x')
+        
+        plt.axvline(x=32, color='red', linestyle='--', linewidth=2, label='Historical MDD 32%')
+        plt.title(f'Leverage {leverage}x - Maximum Drawdown Distribution', fontweight='bold', fontsize=12)
+        plt.xlabel('Maximum Drawdown (%)')
+        plt.ylabel('Density')
+        plt.legend(fontsize=9)
+        plt.grid(True, alpha=0.3)
+    
+    # 4. Risk vs Return Profile - One subplot per leverage
+    for i, (leverage, results) in enumerate(leverage_results.items()):
+        ax = plt.subplot(4, num_leverages, 3*num_leverages + i + 1)
+        
+        if results['final_equities'] and results['max_drawdowns']:
+            returns = [(eq/100 - 1) * 100 for eq in results['final_equities'] if eq <= 1500]
+            mdd_filtered = [results['max_drawdowns'][j] * 100 
+                           for j, eq in enumerate(results['final_equities']) if eq <= 1500]
+            plt.scatter(mdd_filtered, returns, alpha=0.5, s=8, 
+                       color=colors[i % len(colors)], label=f'{leverage}x')
+        
+        plt.axhline(y=0, color='black', linestyle='--', alpha=0.5)
+        plt.axvline(x=32, color='red', linestyle='--', alpha=0.5, label='Historical MDD')
+        plt.ylim(-100, 1400)
+        plt.title(f'Leverage {leverage}x - Risk vs Return Profile', fontweight='bold', fontsize=12)
+        plt.xlabel('Maximum Drawdown (%)')
+        plt.ylabel('Total Return (%)')
+        plt.legend(fontsize=9)
+        plt.grid(True, alpha=0.3)
     
     # Show the plot
     plt.show()
     
-    # Save as high-quality PNG file as requested
+    # Save as high-quality PNG file
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     png_filename = f"rebalancing_simulation_dashboard_{timestamp}.png"
     
@@ -534,8 +423,8 @@ def create_enhanced_plots_with_save(results_16x, results_24x):
     print(f"\nDashboard plot saved as: {png_filename}")
     return png_filename
 
-def export_complete_mdd_data_to_excel(results_16x, results_24x):
-    """Export all 10,000 MDD values to Excel for verification"""
+def export_complete_mdd_data_to_excel(leverage_results):
+    """Export all MDD values to Excel for verification"""
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"Complete_MDD_Analysis_{timestamp}.xlsx"
@@ -547,73 +436,54 @@ def export_complete_mdd_data_to_excel(results_16x, results_24x):
         # Sheet 1: Summary Statistics (Single Numbers)
         summary_data = []
         
-        if results_16x['max_drawdowns']:
-            mdd_16x = np.array(results_16x['max_drawdowns']) * 100
-            summary_data.append({
-                'Leverage': '1.6x',
-                'Sample_Size': len(mdd_16x),
-                'Median_MDD': round(np.percentile(mdd_16x, 50), 2),
-                'P95_MDD': round(np.percentile(mdd_16x, 95), 2),
-                'Worst_MDD': round(np.max(mdd_16x), 2),
-                'Mean_MDD': round(np.mean(mdd_16x), 2),
-                'Historical_32pct_Percentile': round((np.sum(mdd_16x <= 32) / len(mdd_16x)) * 100, 1)
-            })
-        
-        if results_24x['max_drawdowns']:
-            mdd_24x = np.array(results_24x['max_drawdowns']) * 100
-            summary_data.append({
-                'Leverage': '2.4x',
-                'Sample_Size': len(mdd_24x),
-                'Median_MDD': round(np.percentile(mdd_24x, 50), 2),
-                'P95_MDD': round(np.percentile(mdd_24x, 95), 2),
-                'Worst_MDD': round(np.max(mdd_24x), 2),
-                'Mean_MDD': round(np.mean(mdd_24x), 2),
-                'Historical_32pct_Percentile': round((np.sum(mdd_24x <= 32) / len(mdd_24x)) * 100, 1)
-            })
+        for leverage, results in leverage_results.items():
+            if results['max_drawdowns']:
+                mdd_data = np.array(results['max_drawdowns']) * 100
+                summary_data.append({
+                    'Leverage': f'{leverage}x',
+                    'Sample_Size': len(mdd_data),
+                    'Median_MDD': round(np.percentile(mdd_data, 50), 2),
+                    'P95_MDD': round(np.percentile(mdd_data, 95), 2),
+                    'Worst_MDD': round(np.max(mdd_data), 2),
+                    'Mean_MDD': round(np.mean(mdd_data), 2),
+                    'Historical_32pct_Percentile': round((np.sum(mdd_data <= 32) / len(mdd_data)) * 100, 1)
+                })
         
         summary_df = pd.DataFrame(summary_data)
         summary_df.to_excel(writer, sheet_name='MDD_Summary_Statistics', index=False)
         
-        # Sheet 2: All 1.6x MDD Values (COMPLETE LIST)
-        if results_16x['max_drawdowns']:
-            all_mdd_16x = pd.DataFrame({
-                'Simulation_ID': range(1, len(results_16x['max_drawdowns']) + 1),
-                'Max_Drawdown_Pct': [round(dd * 100, 3) for dd in results_16x['max_drawdowns']]
-            })
-            all_mdd_16x = all_mdd_16x.sort_values('Max_Drawdown_Pct', ascending=False).reset_index(drop=True)
-            all_mdd_16x['Rank'] = range(1, len(all_mdd_16x) + 1)
-            all_mdd_16x.to_excel(writer, sheet_name='All_1.6x_MDD_Values', index=False)
+        # Sheets for each leverage: All MDD Values (COMPLETE LIST)
+        for leverage, results in leverage_results.items():
+            if results['max_drawdowns']:
+                all_mdd = pd.DataFrame({
+                    'Simulation_ID': range(1, len(results['max_drawdowns']) + 1),
+                    'Max_Drawdown_Pct': [round(dd * 100, 3) for dd in results['max_drawdowns']]
+                })
+                all_mdd = all_mdd.sort_values('Max_Drawdown_Pct', ascending=False).reset_index(drop=True)
+                all_mdd['Rank'] = range(1, len(all_mdd) + 1)
+                
+                sheet_name = f'All_{leverage}x_MDD_Values'
+                # Excel sheet names cannot exceed 31 characters
+                if len(sheet_name) > 31:
+                    sheet_name = f'MDD_{leverage}x_Values'
+                
+                all_mdd.to_excel(writer, sheet_name=sheet_name, index=False)
         
-        # Sheet 3: All 2.4x MDD Values (COMPLETE LIST)
-        if results_24x['max_drawdowns']:
-            all_mdd_24x = pd.DataFrame({
-                'Simulation_ID': range(1, len(results_24x['max_drawdowns']) + 1),
-                'Max_Drawdown_Pct': [round(dd * 100, 3) for dd in results_24x['max_drawdowns']]
-            })
-            all_mdd_24x = all_mdd_24x.sort_values('Max_Drawdown_Pct', ascending=False).reset_index(drop=True)
-            all_mdd_24x['Rank'] = range(1, len(all_mdd_24x) + 1)
-            all_mdd_24x.to_excel(writer, sheet_name='All_2.4x_MDD_Values', index=False)
-        
-        # Sheet 4: Percentile Breakdown
+        # Sheet: Percentile Breakdown for all leverages
         percentiles = [1, 5, 10, 25, 50, 75, 90, 95, 99, 100]
         percentile_data = []
         
         for p in percentiles:
             row = {'Percentile': f'{p}th'}
             
-            if results_16x['max_drawdowns']:
-                mdd_16x = np.array(results_16x['max_drawdowns']) * 100
-                if p == 100:
-                    row['Leverage_1.6x_MDD'] = round(np.max(mdd_16x), 2)
-                else:
-                    row['Leverage_1.6x_MDD'] = round(np.percentile(mdd_16x, p), 2)
-            
-            if results_24x['max_drawdowns']:
-                mdd_24x = np.array(results_24x['max_drawdowns']) * 100
-                if p == 100:
-                    row['Leverage_2.4x_MDD'] = round(np.max(mdd_24x), 2)
-                else:
-                    row['Leverage_2.4x_MDD'] = round(np.percentile(mdd_24x, p), 2)
+            for leverage, results in leverage_results.items():
+                if results['max_drawdowns']:
+                    mdd_data = np.array(results['max_drawdowns']) * 100
+                    column_name = f'Leverage_{leverage}x_MDD'
+                    if p == 100:
+                        row[column_name] = round(np.max(mdd_data), 2)
+                    else:
+                        row[column_name] = round(np.percentile(mdd_data, p), 2)
             
             percentile_data.append(row)
         
@@ -746,11 +616,63 @@ def print_results_summary(name, results):
         print(f"   • Mean MDD: {np.mean(mdd_data):.1f}%")
         print(f"   • Worst MDD: {np.max(mdd_data):.1f}%")
 
-def run_complete_simulation():
+def parse_arguments():
+    """Parse command line arguments for leverage values"""
+    parser = argparse.ArgumentParser(
+        description='Monte Carlo simulation for leveraged portfolio analysis',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  python drawdown_analysis.py                    # Default: 1.6x, 2.0x, 2.4x
+  python drawdown_analysis.py 3.0               # 1.6x, 2.0x, 2.4x, 3.0x
+  python drawdown_analysis.py 2.8 3.2           # 1.6x, 2.0x, 2.4x, 2.8x, 3.2x
+        """
+    )
+    
+    parser.add_argument(
+        'additional_leverages', 
+        nargs='*', 
+        type=float,
+        help='Additional leverage ratios (up to 2 additional values, max 5 total)'
+    )
+    
+    args = parser.parse_args()
+    
+    # Default leverages
+    default_leverages = [1.6, 2.0, 2.4]
+    
+    # Validate additional leverages
+    if len(args.additional_leverages) > 2:
+        print("Error: Maximum 2 additional leverage values allowed (5 total maximum)")
+        sys.exit(1)
+    
+    # Validate leverage values are positive
+    for lev in args.additional_leverages:
+        if lev <= 0:
+            print(f"Error: Leverage values must be positive, got {lev}")
+            sys.exit(1)
+        if lev > 10:
+            print(f"Warning: Very high leverage {lev}x detected. This may cause extreme results.")
+    
+    # Combine default and additional leverages
+    all_leverages = default_leverages + list(args.additional_leverages)
+    
+    # Remove duplicates while preserving order
+    unique_leverages = []
+    for lev in all_leverages:
+        if lev not in unique_leverages:
+            unique_leverages.append(lev)
+    
+    return sorted(unique_leverages)
+
+def run_complete_simulation(leverages=None):
     """Execute complete simulation with all requested features"""
+    
+    if leverages is None:
+        leverages = [1.6, 2.0, 2.4]  # Default leverages
     
     print("20-Day Rebalancing Monte Carlo Simulation")
     print("Parameters: Annual Return 10%, Annual Volatility 10%, Margins 13.7%/12.2%")
+    print(f"Analyzing leverages: {[f'{l}x' for l in leverages]}")
     
     # Common parameters
     common_params = {
@@ -765,30 +687,31 @@ def run_complete_simulation():
         'rebalancing_frequency': 20
     }
     
-    # Run simulations
-    print("\n1️⃣ Running Leverage 1.6x Simulation...")
-    results_16x = futures_portfolio_simulation_with_rebalancing(target_leverage=1.6, **common_params)
+    # Run simulations for all leverages
+    leverage_results = {}
+    excel_files = []
     
-    print("\n2️⃣ Running Leverage 2.4x Simulation...")
-    results_24x = futures_portfolio_simulation_with_rebalancing(target_leverage=2.4, **common_params)
-    
-    # Print results
-    print_results_summary("Leverage 1.6x", results_16x)
-    print_results_summary("Leverage 2.4x", results_24x)
+    for i, leverage in enumerate(leverages, 1):
+        print(f"\n{i}️⃣ Running Leverage {leverage}x Simulation...")
+        results = futures_portfolio_simulation_with_rebalancing(target_leverage=leverage, **common_params)
+        leverage_results[leverage] = results
+        
+        # Print results
+        print_results_summary(f"Leverage {leverage}x", results)
+        
+        # Export detailed simulation results
+        excel_file = export_results_to_excel(results, leverage)
+        excel_files.append(excel_file)
     
     # Extract exact MDD statistics
-    mdd_stats = extract_exact_mdd_statistics(results_16x, results_24x)
+    mdd_stats = extract_exact_mdd_statistics(leverage_results)
     
     # Export complete MDD data
-    mdd_excel_file = export_complete_mdd_data_to_excel(results_16x, results_24x)
+    mdd_excel_file = export_complete_mdd_data_to_excel(leverage_results)
     
     # Create and save enhanced plots
     print(f"\nCreating enhanced visualization dashboard...")
-    png_file = create_enhanced_plots_with_save(results_16x, results_24x)
-    
-    # Export detailed simulation results
-    excel_16x = export_results_to_excel(results_16x, 1.6)
-    excel_24x = export_results_to_excel(results_24x, 2.4)
+    png_file = create_enhanced_plots_with_save(leverage_results)
     
     # Final summary
     print(f"\n{'='*70}")
@@ -797,12 +720,19 @@ def run_complete_simulation():
     print(f"Generated Files:")
     print(f"   📊 Dashboard PNG: {png_file}")
     print(f"   📋 Complete MDD Analysis: {mdd_excel_file}")
-    print(f"   📄 Detailed Results: {excel_16x}, {excel_24x}")
+    print(f"   📄 Detailed Results: {', '.join(excel_files)}")
     print(f"\nAll outputs in English as requested")
     
-    return results_16x, results_24x, mdd_stats
+    return leverage_results, mdd_stats
 
 # Execute the complete analysis
 if __name__ == "__main__":
-    results_16x, results_24x, mdd_statistics = run_complete_simulation()
+    # Parse command line arguments
+    leverages = parse_arguments()
+    
+    print(f"Starting simulation with leverages: {leverages}")
+    
+    # Run the complete simulation
+    leverage_results, mdd_statistics = run_complete_simulation(leverages)
+    
     print("\n✅ Complete simulation analysis finished successfully!")
